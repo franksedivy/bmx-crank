@@ -1,0 +1,7 @@
+name=BMX Crank
+author=BytePie
+description=Pull serious BMX tricks using the crank!
+bundleID=com.bytepie.bmxcrank
+version=0.0.1
+buildNumber=1
+imagePath=launcher
