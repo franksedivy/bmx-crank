@@ -2,15 +2,20 @@ local gfx <const> = playdate.graphics
 
 -- Riding-model tuning. Units are pixels, seconds and degrees.
 local tuning <const> = {
-	speedGainPerDegree = 0.5,
+	speedGainPerDegree = 0.8,
 	rollingResistance = 35,
-	maximumSpeed = 160,
+	maximumSpeed = 220,
 	gravity = 90,
 	minimumTurnHeight = 8,
 	maximumTurnHeight = 42,
 	maximumChargeDuration = 1.0,
 	minimumTurnDuration = 0.25,
 	maximumTurnDuration = 0.55,
+	turnPoseCount = 4,
+	wheelBase = 32,
+	wheelRadius = 12,
+	wheelMarkerOrbitRadius = 7,
+	wheelMarkerRadius = 2,
 }
 
 local Rider = {}
@@ -24,6 +29,7 @@ function Rider.new()
 	rider.x = 40
 	rider.speed = 0
 	rider.facing = 1
+	rider.wheelRotation = 0
 
 	-- Charged-turn state
 	rider.isChargingTurn = false
@@ -32,6 +38,8 @@ function Rider.new()
 	rider.turnElapsed = 0
 	rider.turnOffsetY = 0
 	rider.turnFacingChanged = false
+	rider.turnRotation = 0
+	rider.turnStartFacing = 1
 	rider.activeTurnHeight = tuning.minimumTurnHeight
 	rider.activeTurnDuration = tuning.minimumTurnDuration
 
@@ -85,7 +93,7 @@ function Rider:updateResistance(deltaTime)
 	)
 end
 
--- Handles charging, releasing and animating the A-button turn action.
+-- Handles charging, releasing and animating the down-button turn action.
 function Rider:updateTurn(deltaTime, turnPressed, turnReleased)
 	if turnPressed
 		and not self.isTurning
@@ -122,6 +130,8 @@ function Rider:releaseTurn()
 		+ (tuning.maximumTurnDuration - tuning.minimumTurnDuration)
 		* chargeAmount
 
+	self.turnStartFacing = self.facing
+	self.turnRotation = 0
 	self.isTurning = true
 	self.turnElapsed = 0
 	self.turnFacingChanged = false
@@ -136,8 +146,22 @@ function Rider:animateTurn(deltaTime)
 		1
 	)
 
-	self.turnOffsetY = -math.sin(turnProgress * math.pi)
+	-- A parabolic arc gives maximum speed at takeoff and landing,
+	-- slowing smoothly  to zero vertical speed at the apex.
+	self.turnOffsetY = -4
 		* self.activeTurnHeight
+		* turnProgress
+		* (1 - turnProgress)
+
+	-- Quantise the 180-degree turn into four temporary animation poses.
+	local poseIndex = math.min(
+		tuning.turnPoseCount - 1,
+		math.floor(turnProgress * tuning.turnPoseCount)
+	)
+
+	self.turnRotation = poseIndex
+		/ (tuning.turnPoseCount - 1)
+		* math.pi
 
 	if turnProgress >= 0.5 and not self.turnFacingChanged then
 		self.facing = -self.facing
@@ -145,6 +169,12 @@ function Rider:animateTurn(deltaTime)
 	end
 
 	if turnProgress >= 1 then
+		-- Preserve the wheel-marker rotation produced by the flip.
+		self.wheelRotation = (
+			self.wheelRotation + self.turnRotation
+		) % (math.pi * 2)
+
+		self.turnRotation = 0
 		self.isTurning = false
 		self.turnOffsetY = 0
 	end
@@ -154,6 +184,13 @@ end
 function Rider:updatePosition(deltaTime, pool)
 	local trackSlope = pool:getSlope(self.x)
 	local tangentLength = math.sqrt(1 + trackSlope * trackSlope)
+
+	-- Convert surface travel into wheel rotation.
+	-- Positive speed rotates clockwise; reverse speed rotates anticlockwise.
+	self.wheelRotation = (
+		self.wheelRotation
+			+ self.speed / tuning.wheelRadius * deltaTime
+	) % (math.pi * 2)
 
 	-- Surface speed produces less horizontal movement on steep walls.
 	local horizontalSpeed = self.speed / tangentLength
@@ -182,18 +219,107 @@ function Rider:getTurnPower()
 	)
 end
 
--- Draws the temporary rider marker at its current pool position.
+-- Draws one temporary wheel and its rotating white marker.
+local function drawWheel(x, y, rotation)
+	gfx.setColor(gfx.kColorBlack)
+	gfx.fillCircleAtPoint(x, y, tuning.wheelRadius)
+
+	local rotationMarkerX = x
+		+ math.cos(rotation)
+		* tuning.wheelMarkerOrbitRadius
+
+	local rotationMarkerY = y
+		+ math.sin(rotation)
+		* tuning.wheelMarkerOrbitRadius
+
+	gfx.setColor(gfx.kColorWhite)
+	gfx.fillCircleAtPoint(
+		rotationMarkerX,
+		rotationMarkerY,
+		tuning.wheelMarkerRadius
+	)
+
+	gfx.setColor(gfx.kColorBlack)
+end
+
+-- Positions a wheel one radius above the pool along its surface normal.
+local function getWheelCenter(pool, contactX, jumpOffsetY)
+	local slope = pool:getSlope(contactX)
+	local normalLength = math.sqrt(1 + slope * slope)
+
+	local wheelX = contactX
+		+ slope
+		/ normalLength
+		* tuning.wheelRadius
+
+	local wheelY = pool:getY(contactX)
+		- tuning.wheelRadius
+		/ normalLength
+		+ jumpOffsetY
+
+	return wheelX, wheelY
+end
+
+-- Draws both wheels tangent to the pool surface.
 function Rider:draw(pool)
-	local riderY = pool:getY(self.x) - 8 + self.turnOffsetY
+	local centerSlope = pool:getSlope(self.x)
+	local centerTangentLength = math.sqrt(
+		1 + centerSlope * centerSlope
+	)
 
-	gfx.fillCircleAtPoint(self.x, riderY, 8)
+	-- Keep the bike centred on self.x.
+	-- Changing facing swaps the front and rear wheels without moving the bike.
+	local visualFacing = self.facing
+	local wheelbaseScale = 1
+	local displayedWheelRotation = self.wheelRotation
 
-	-- Temporary direction marker showing which way the rider faces.
+	if self.isTurning then
+		visualFacing = self.turnStartFacing
+		wheelbaseScale = math.cos(self.turnRotation)
+		displayedWheelRotation = (
+			self.wheelRotation + self.turnRotation
+		) % (math.pi * 2)
+	end
+
+	local contactOffsetX = visualFacing
+		* wheelbaseScale
+		/ centerTangentLength
+		* tuning.wheelBase
+		/ 2
+
+	local rearContactX = self.x - contactOffsetX
+	local frontContactX = self.x + contactOffsetX
+
+	local rearWheelX, rearWheelY = getWheelCenter(
+		pool,
+		rearContactX,
+		self.turnOffsetY
+	)
+
+	local frontWheelX, frontWheelY = getWheelCenter(
+		pool,
+		frontContactX,
+		self.turnOffsetY
+	)
+
+	-- Draw the basic frame behind the wheels.
 	gfx.drawLine(
-		self.x,
-		riderY,
-		self.x + 12 * self.facing,
-		riderY
+		rearWheelX,
+		rearWheelY,
+		frontWheelX,
+		frontWheelY
+	)
+
+	drawWheel(
+		rearWheelX,
+		rearWheelY,
+		displayedWheelRotation
+	)
+
+	drawWheel(
+		frontWheelX,
+		frontWheelY,
+		displayedWheelRotation
 	)
 end
 

@@ -33,8 +33,8 @@ function Game:update()
 	self.rider:update(
 		deltaTime,
 		crankChange,
-		playdate.buttonJustPressed(playdate.kButtonA),
-		playdate.buttonJustReleased(playdate.kButtonA),
+		playdate.buttonJustPressed(playdate.kButtonDown),
+		playdate.buttonJustReleased(playdate.kButtonDown),
 		self.pool
 	)
 

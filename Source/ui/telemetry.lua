@@ -32,7 +32,7 @@ function Telemetry:draw(crankPosition, crankChange, riderSpeed, turnPower)
 
 	gfx.drawText(
 		"Turn power: " .. math.floor(turnPower * 100 + 0.5) .. "%",
-		275,
+		265,
 		65
 	)
 end
