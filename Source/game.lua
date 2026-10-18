@@ -35,8 +35,14 @@ function Game:update()
 		crankChange,
 		playdate.buttonJustPressed(playdate.kButtonDown),
 		playdate.buttonJustReleased(playdate.kButtonDown),
+		playdate.buttonIsPressed(playdate.kButtonDown),
 		self.pool
 	)
+	
+	-- Respawn with fresh movement and action state after leaving the screen.
+	if self.rider:isGameOver() then
+		self.rider = Rider.new()
+	end
 
 	gfx.clear(gfx.kColorWhite)
 

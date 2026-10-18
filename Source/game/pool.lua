@@ -58,6 +58,21 @@ function Pool:draw()
 		previousX = x
 		previousY = y
 	end
+	
+	-- Draw the flat decks extending outward from both pool lips.
+	gfx.drawLine(
+		0,
+		self.lipY,
+		self.leftX,
+		self.lipY
+	)
+	
+	gfx.drawLine(
+		self.rightX,
+		self.lipY,
+		400,
+		self.lipY
+	)
 end
 
 return Pool
