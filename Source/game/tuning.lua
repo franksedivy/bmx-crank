@@ -6,10 +6,27 @@ local tuning <const> = {
 	screenHeight = 240,
 
 	-- Bike properties
-	wheelBase = 48,
-	wheelRadius = 12,
+	wheelBase = 38,
+	wheelRadius = 8,
+	forkLength = 20,
 	wheelMarkerOrbitRadius = 7,
 	wheelMarkerRadius = 2,
+
+	-- Rider artwork alignment. The visibility toggle lives in game.lua.
+	riderSpritePath = "images/rider/default-side",
+	riderSpriteScale = 1.4,
+	-- Offsets are pixels in bike-local space: positive X is forward, Y is down.
+	riderSpriteOffsetX = 0,
+	riderSpriteOffsetY = 0,
+	-- Extra clockwise rotation in degrees, mirrored when facing left.
+	riderSpriteAngleOffset = 0,
+	-- Source-image axle midpoint; rotation and placement are anchored here.
+	riderSpritePivotX = 31.5,
+	riderSpritePivotY = 49,
+	-- Source-image wheel spacing/radius, used to erase the sprite's static wheels.
+	-- Adjust these if the PNG's wheel positions change; rebuild to refresh.
+	riderSpriteWheelBase = 27,
+	riderSpriteWheelMaskRadius = 8,
 
 	-- Bike movement
 	speedGainPerDegree = 0.3,

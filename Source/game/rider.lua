@@ -234,7 +234,7 @@ function Rider:beginTakeoff(pool, takeoffWasSuccessful)
 			and self.preparedTakeoffFacing
 			or -self.facing
 		self.airborneX = lipX
-		self.airborneY = pool.lipY - tuning.wheelRadius
+		self.airborneY = pool:getLipY(takeoffSide) - tuning.wheelRadius
 		self.airborneVelocityX = 0
 		self.airborneVelocityY = -math.abs(self.speed)
 		self.airborneLaunchSpeed = math.abs(self.speed)
@@ -320,7 +320,8 @@ function Rider:updateAirborne(deltaTime, pool)
 	-- A prepared takeoff lands once the rider descends to lip height again.
 	if self.takeoffWasSuccessful
 		and self.airborneVelocityY > 0
-		and self.airborneY >= pool.lipY - tuning.wheelRadius then
+		and self.airborneY >= pool:getLipY(self.takeoffSide)
+			- tuning.wheelRadius then
 
 		local lipSlope = pool:getSlope(
 			self.takeoffSide > 0 and pool.rightX or pool.leftX
@@ -457,8 +458,8 @@ function Rider:isGameOver()
 end
 
 -- Delegates temporary bike drawing to the renderer.
-function Rider:draw(pool)
-	RiderRenderer.draw(self, pool)
+function Rider:draw(pool, riderSpriteEnabled)
+	RiderRenderer.draw(self, pool, tuning, riderSpriteEnabled)
 end
 
 return Rider
