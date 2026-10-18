@@ -24,6 +24,9 @@ end
 function Game:update()
 	local crankPosition = playdate.getCrankPosition()
 	local crankChange = playdate.getCrankChange()
+	local actionPressed = playdate.buttonJustPressed(playdate.kButtonDown)
+	local actionReleased = playdate.buttonJustReleased(playdate.kButtonDown)
+	local actionHeld = playdate.buttonIsPressed(playdate.kButtonDown)
 
 	-- Use elapsed time so movement is independent of frame rate.
 	local currentTime = playdate.getCurrentTimeMilliseconds()
@@ -33,9 +36,9 @@ function Game:update()
 	self.rider:update(
 		deltaTime,
 		crankChange,
-		playdate.buttonJustPressed(playdate.kButtonDown),
-		playdate.buttonJustReleased(playdate.kButtonDown),
-		playdate.buttonIsPressed(playdate.kButtonDown),
+		actionPressed,
+		actionReleased,
+		actionHeld,
 		self.pool
 	)
 	

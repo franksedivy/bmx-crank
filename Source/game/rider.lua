@@ -1,40 +1,9 @@
-local gfx <const> = playdate.graphics
-
--- Riding-model tuning. Units are pixels, seconds and degrees.
-local tuning <const> = {
-	-- Globals
-	gravity = 90,
-	screenWidth = 400,
-	screenHeight = 240,
-	
-	-- Bike properties
-	wheelBase = 48,
-	wheelRadius = 12,
-	wheelMarkerOrbitRadius = 7,
-	wheelMarkerRadius = 2,
-	
-	-- Bike movement
-	speedGainPerDegree = 0.3,
-	rollingResistance = 35,
-	maximumSpeed = 280,
-	
-	-- Direction turning
-	minimumTurnHeight = 8,
-	maximumTurnHeight = 42,
-	maximumChargeDuration = 1.0,
-	minimumTurnDuration = 0.25,
-	maximumTurnDuration = 0.55,
-	turnPoseCount = 4,
-	
-	-- Jumping
-	airborneGravity = 420,
-	stallSettleDuration = 0.3,
-}
+local tuning <const> = import "game/tuning"
+local RiderRenderer <const> = import "game/rider_renderer"
 
 -- Basic rider states
 local riderState <const> = {
 	riding = "riding",
-	lipStall = "lipStall",
 	airborne = "airborne",
 	gameOver = "gameOver",
 }
@@ -84,32 +53,31 @@ function Rider.new()
 	
 	-- Lip-transition state
 	rider.straddlingSide = 0
-	rider.stallSide = 0
-	rider.stallStartX = 0
-	rider.stallTargetX = 0
-	rider.stallSettleElapsed = 0
-	rider.stallLockProgress = 0
 
 	return rider
 end
 
 -- Advances every part of the rider simulation for one frame.
-function Rider:update(deltaTime, crankChange, turnPressed, turnReleased, jumpHeld, pool)
+function Rider:update(
+	deltaTime,
+	crankChange,
+	actionPressed,
+	actionReleased,
+	actionHeld,
+	pool
+)
 	if self.state == riderState.airborne then
 		self:updateAirborne(deltaTime, pool)
 		return
 	elseif self.state == riderState.gameOver then
-		return
-	elseif self.state == riderState.lipStall then
-		self:updateLipStallSettlement(deltaTime)
 		return
 	end
 	
 	self:updatePedalling(crankChange)
 	self:updateGravity(deltaTime, pool)
 	self:updateResistance(deltaTime)
-	self:updateTurn(deltaTime, turnPressed, turnReleased)
-	self:updatePosition(deltaTime, jumpHeld, pool)
+	self:updateTurn(deltaTime, actionPressed, actionReleased)
+	self:updatePosition(deltaTime, actionHeld, pool)
 end
 
 -- Converts forward crank movement into speed in the facing direction.
@@ -150,9 +118,9 @@ function Rider:updateResistance(deltaTime)
 	)
 end
 
--- Handles charging, releasing and animating the down-button turn action.
-function Rider:updateTurn(deltaTime, turnPressed, turnReleased)
-	if turnPressed
+-- Handles charging, releasing and animating the shared button action.
+function Rider:updateTurn(deltaTime, actionPressed, actionReleased)
+	if actionPressed
 		and not self.isTurning
 		and not self.isChargingTurn then
 
@@ -164,7 +132,7 @@ function Rider:updateTurn(deltaTime, turnPressed, turnReleased)
 		self.turnChargeElapsed = self.turnChargeElapsed + deltaTime
 	end
 
-	if turnReleased and self.isChargingTurn then
+	if actionReleased and self.isChargingTurn then
 		self:releaseTurn()
 	end
 
@@ -396,44 +364,8 @@ function Rider:updateAirborne(deltaTime, pool)
 	end
 end
 
--- Begins the short fall from the straddling position onto the deck.
-function Rider:beginLipStall(side, pool, halfWheelbaseX)
-	self.state = riderState.lipStall
-	self.stallSide = side
-	self.straddlingSide = 0
-	self.speed = 0
-	self.stallStartX = self.x
-	self.stallSettleElapsed = 0
-	self.stallLockProgress = 0
-
-	if side > 0 then
-		self.stallTargetX = pool.rightX - halfWheelbaseX
-	else
-		self.stallTargetX = pool.leftX + halfWheelbaseX
-	end
-
-	print("Lip stall")
-end
-
--- Eases the bike into its locked position under simulated gravity.
-function Rider:updateLipStallSettlement(deltaTime)
-	if self.stallLockProgress >= 1 then
-		return
-	end
-
-	self.stallSettleElapsed = self.stallSettleElapsed + deltaTime
-
-	local progress = math.min(
-		self.stallSettleElapsed / tuning.stallSettleDuration,
-		1
-	)
-
-	-- Start slowly, then accelerate into the deck like a short fall.
-	self.stallLockProgress = progress * progress
-end
-
 -- Moves the rider along the pool and keeps them within its current bounds.
-function Rider:updatePosition(deltaTime, jumpHeld, pool)
+function Rider:updatePosition(deltaTime, actionHeld, pool)
 	local trackSlope = pool:getSlope(self.x)
 	local tangentLength = math.sqrt(1 + trackSlope * trackSlope)
 
@@ -482,11 +414,10 @@ function Rider:updatePosition(deltaTime, jumpHeld, pool)
 	
 			self:beginTakeoff(
 				pool,
-				jumpHeld or self.takeoffPrepared
+				actionHeld or self.takeoffPrepared
 			)
 		elseif self.speed <= 0 then
-			-- Lip stalls are disabled for now. Let gravity pull the rider
-			-- naturally back into the pool when momentum runs out.
+			-- Let gravity pull the rider back when momentum runs out.
 			self.straddlingSide = 0
 		end
 	elseif self.straddlingSide == -1 then
@@ -498,11 +429,10 @@ function Rider:updatePosition(deltaTime, jumpHeld, pool)
 	
 			self:beginTakeoff(
 				pool,
-				jumpHeld or self.takeoffPrepared
+				actionHeld or self.takeoffPrepared
 			)
 		elseif self.speed >= 0 then
-			-- Lip stalls are disabled for now. Let gravity pull the rider
-			-- naturally back into the pool when momentum runs out.
+			-- Let gravity pull the rider back when momentum runs out.
 			self.straddlingSide = 0
 		end
 	end
@@ -526,311 +456,9 @@ function Rider:isGameOver()
 	return self.state == riderState.gameOver
 end
 
--- Draws one temporary wheel and its rotating white marker.
-local function drawWheel(x, y, rotation)
-	gfx.setColor(gfx.kColorBlack)
-	gfx.fillCircleAtPoint(x, y, tuning.wheelRadius)
-
-	local rotationMarkerX = x
-		+ math.cos(rotation)
-		* tuning.wheelMarkerOrbitRadius
-
-	local rotationMarkerY = y
-		+ math.sin(rotation)
-		* tuning.wheelMarkerOrbitRadius
-
-	gfx.setColor(gfx.kColorWhite)
-	gfx.fillCircleAtPoint(
-		rotationMarkerX,
-		rotationMarkerY,
-		tuning.wheelMarkerRadius
-	)
-
-	gfx.setColor(gfx.kColorBlack)
-end
-
--- Positions a wheel one radius above the pool along its surface normal.
-local function getWheelCenter(pool, contactX, jumpOffsetY)
-	local slope = pool:getSlope(contactX)
-	local normalLength = math.sqrt(1 + slope * slope)
-
-	local wheelX = contactX
-		+ slope
-		/ normalLength
-		* tuning.wheelRadius
-
-	local wheelY = pool:getY(contactX)
-		- tuning.wheelRadius
-		/ normalLength
-		+ jumpOffsetY
-
-	return wheelX, wheelY
-end
-
--- Finds the inner wheel position that keeps a rigid bike connected to a
--- wheel resting on the deck. The search follows the pool surface inward.
-local function getLockedInnerWheelCenter(
-	pool,
-	stallSide,
-	outerWheelX,
-	outerWheelY,
-	wheelSpan,
-	jumpOffsetY
-)
-	local lipContactX = stallSide > 0
-		and pool.rightX
-		or pool.leftX
-
-	local nearLip = 0
-	local nearCenter = 1
-
-	for _ = 1, 12 do
-		local position = (nearLip + nearCenter) / 2
-		local contactX = lipContactX
-			+ (pool.centerX - lipContactX) * position
-
-		local wheelX, wheelY = getWheelCenter(
-			pool,
-			contactX,
-			jumpOffsetY
-		)
-
-		local distanceX = outerWheelX - wheelX
-		local distanceY = outerWheelY - wheelY
-		local distance = math.sqrt(
-			distanceX * distanceX + distanceY * distanceY
-		)
-
-		if distance < wheelSpan then
-			nearLip = position
-		else
-			nearCenter = position
-		end
-	end
-
-	local position = (nearLip + nearCenter) / 2
-	local contactX = lipContactX
-		+ (pool.centerX - lipContactX) * position
-
-	return getWheelCenter(pool, contactX, jumpOffsetY)
-end
-
--- Draws both wheels tangent to the pool surface.
+-- Delegates temporary bike drawing to the renderer.
 function Rider:draw(pool)
-	if self.state == riderState.airborne
-	or self.state == riderState.gameOver then
-		local directionX = math.cos(self.airborneAngle)
-		local directionY = math.sin(self.airborneAngle)
-		local halfWheelbase = tuning.wheelBase / 2
-	
-		local rearWheelX = self.airborneX
-			- directionX * halfWheelbase
-	
-		local rearWheelY = self.airborneY
-			- directionY * halfWheelbase
-	
-		local frontWheelX = self.airborneX
-			+ directionX * halfWheelbase
-	
-		local frontWheelY = self.airborneY
-			+ directionY * halfWheelbase
-			
-		gfx.drawLine(
-			rearWheelX,
-			rearWheelY,
-			frontWheelX,
-			frontWheelY
-		)
-	
-		drawWheel(
-			rearWheelX,
-			rearWheelY,
-			self.wheelRotation
-		)
-	
-		drawWheel(
-			frontWheelX,
-			frontWheelY,
-			self.wheelRotation
-		)
-	
-		return
-	end
-	
-	local centerSlope = pool:getSlope(self.x)
-	local centerTangentLength = math.sqrt(
-		1 + centerSlope * centerSlope
-	)
-
-	-- Keep the bike centred on self.x.
-	-- Changing facing swaps the front and rear wheels without moving the bike.
-	local visualFacing = self.facing
-	local wheelbaseScale = 1
-	local displayedWheelRotation = self.wheelRotation
-
-	if self.isTurning then
-		visualFacing = self.turnStartFacing
-		wheelbaseScale = math.cos(self.turnRotation)
-		displayedWheelRotation = (
-			self.wheelRotation + self.turnRotation
-		) % (math.pi * 2)
-	end
-
-	local contactOffsetX = visualFacing
-		* wheelbaseScale
-		/ centerTangentLength
-		* tuning.wheelBase
-		/ 2
-
-	local rearContactX = self.x - contactOffsetX
-	local frontContactX = self.x + contactOffsetX
-
-	local rearWheelX, rearWheelY = getWheelCenter(
-		pool,
-		rearContactX,
-		self.turnOffsetY
-	)
-
-	local frontWheelX, frontWheelY = getWheelCenter(
-		pool,
-		frontContactX,
-		self.turnOffsetY
-	)
-
-	-- Move between two rigid bike poses: the straddling pose and a locked
-	-- pose with one wheel on the deck and the other resting on the pool.
-	if self.state == riderState.lipStall then
-		local lockProgress = self.stallLockProgress
-		local deckWheelY = pool.lipY
-			- tuning.wheelRadius
-			+ self.turnOffsetY
-
-		local innerWheelX
-		local innerWheelY
-		local outerWheelX
-		local outerWheelY
-		local lockedOuterWheelX
-		local outerIsFront
-
-		if self.stallSide > 0 then
-			lockedOuterWheelX = pool.rightX
-
-			if frontContactX > rearContactX then
-				outerIsFront = true
-				outerWheelX = frontWheelX
-				outerWheelY = frontWheelY
-				innerWheelX = rearWheelX
-				innerWheelY = rearWheelY
-			else
-				outerIsFront = false
-				outerWheelX = rearWheelX
-				outerWheelY = rearWheelY
-				innerWheelX = frontWheelX
-				innerWheelY = frontWheelY
-			end
-		else
-			lockedOuterWheelX = pool.leftX
-
-			if frontContactX < rearContactX then
-				outerIsFront = true
-				outerWheelX = frontWheelX
-				outerWheelY = frontWheelY
-				innerWheelX = rearWheelX
-				innerWheelY = rearWheelY
-			else
-				outerIsFront = false
-				outerWheelX = rearWheelX
-				outerWheelY = rearWheelY
-				innerWheelX = frontWheelX
-				innerWheelY = frontWheelY
-			end
-		end
-
-		local initialX = outerWheelX - innerWheelX
-		local initialY = outerWheelY - innerWheelY
-		local wheelSpan = math.sqrt(
-			initialX * initialX + initialY * initialY
-		)
-
-		local lockedInnerWheelX, lockedInnerWheelY =
-			getLockedInnerWheelCenter(
-				pool,
-				self.stallSide,
-				lockedOuterWheelX,
-				deckWheelY,
-				wheelSpan,
-				self.turnOffsetY
-			)
-
-		local initialCenterX = (innerWheelX + outerWheelX) / 2
-		local initialCenterY = (innerWheelY + outerWheelY) / 2
-		local lockedCenterX = (
-			lockedInnerWheelX + lockedOuterWheelX
-		) / 2
-		local lockedCenterY = (
-			lockedInnerWheelY + deckWheelY
-		) / 2
-
-		local centerX = initialCenterX
-			+ (lockedCenterX - initialCenterX) * lockProgress
-		local centerY = initialCenterY
-			+ (lockedCenterY - initialCenterY) * lockProgress
-
-		local initialAngle = math.atan(initialY, initialX)
-		local lockedAngle = math.atan(
-			deckWheelY - lockedInnerWheelY,
-			lockedOuterWheelX - lockedInnerWheelX
-		)
-		local angle = initialAngle
-			+ (lockedAngle - initialAngle) * lockProgress
-
-		local halfSpanX = math.cos(angle) * wheelSpan / 2
-		local halfSpanY = math.sin(angle) * wheelSpan / 2
-
-		if self.stallSide > 0 then
-			innerWheelX = centerX - halfSpanX
-			innerWheelY = centerY - halfSpanY
-			outerWheelX = centerX + halfSpanX
-			outerWheelY = centerY + halfSpanY
-		else
-			innerWheelX = centerX + halfSpanX
-			innerWheelY = centerY + halfSpanY
-			outerWheelX = centerX - halfSpanX
-			outerWheelY = centerY - halfSpanY
-		end
-
-		if outerIsFront then
-			frontWheelX = outerWheelX
-			frontWheelY = outerWheelY
-			rearWheelX = innerWheelX
-			rearWheelY = innerWheelY
-		else
-			frontWheelX = innerWheelX
-			frontWheelY = innerWheelY
-			rearWheelX = outerWheelX
-			rearWheelY = outerWheelY
-		end
-	end
-
-	-- Draw the basic frame behind the wheels.
-	gfx.drawLine(
-		rearWheelX,
-		rearWheelY,
-		frontWheelX,
-		frontWheelY
-	)
-
-	drawWheel(
-		rearWheelX,
-		rearWheelY,
-		displayedWheelRotation
-	)
-
-	drawWheel(
-		frontWheelX,
-		frontWheelY,
-		displayedWheelRotation
-	)
+	RiderRenderer.draw(self, pool)
 end
 
 return Rider
